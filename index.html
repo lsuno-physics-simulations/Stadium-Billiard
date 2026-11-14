@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stadium billiards — computational physics</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#edf2f5;color:#182d3d;font:16px system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px}h1{font-size:28px;margin:0 0 8px}h2{font-size:17px;margin:0 0 12px}p{line-height:1.55}header p{margin:0 0 20px;color:#435b6b}.controls,.panel{background:white;border:1px solid #cdd9e1;border-radius:12px;padding:18px}.controls{display:flex;gap:16px;flex-wrap:wrap;align-items:end;margin-bottom:16px}label{display:grid;gap:6px;font-size:14px}input,select,button{font:inherit;border:1px solid #849bab;border-radius:6px;padding:8px;background:white;color:#182d3d}input[type=number]{width:110px}button{cursor:pointer}button.primary{background:#165c8b;color:white}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #dd8b20;outline-offset:2px}.plots{display:grid;grid-template-columns:1fr 1fr;gap:16px}canvas{width:100%;height:360px;display:block;background:#f7fafc;border-radius:6px}.legend{display:flex;gap:20px;font-size:14px;margin:12px 0}.a{color:#1264a3}.b{color:#a74b12}.stats{display:flex;flex-wrap:wrap;gap:20px;padding:16px 0;font-variant-numeric:tabular-nums}.hint{font-size:14px;color:#435b6b}details{margin-top:16px}summary{cursor:pointer}code{font-size:14px}a{color:#155d8d}#error{color:#a12525} @media(max-width:700px){main{padding:14px}.plots{grid-template-columns:1fr}canvas{height:300px}}
+</style>
+</head>
+<body><main>
+<header><h1>Stadium billiards</h1><p>Explore how a small change in a billiard table can change the motion of a particle.</p></header>
+<div class="controls">
+<label>Half straight length a / R<select id="shape"><option value="0">0 — circle</option><option value="0.01">0.01</option><option value="0.1" selected>0.1</option><option value="0.5">0.5</option><option value="1">1</option></select></label>
+<label>Initial x / R<input id="x0" type="number" min="-0.95" max="0.95" step="0.05" value="0.2"></label>
+<label>Launch angle (degrees)<input id="angle" type="number" min="-360" max="360" step="1" value="35"></label>
+<label>Second ball offset δx / R<select id="delta"><option value="0.000001" selected>0.000001</option><option value="0.0001">0.0001</option><option value="0.01">0.01</option></select></label>
+<label>Playback speed<select id="speed"><option value="1">1×</option><option value="5" selected>5×</option><option value="20">20×</option><option value="100">100×</option></select></label>
+<button id="play" class="primary">Start</button><button id="step">Step Δt = 1</button><button id="reset">Reset</button>
+</div>
+<p id="error" role="alert"></p>
+<div class="plots"><section class="panel"><h2>Table and trajectories</h2><canvas id="table" aria-label="Two particles reflecting inside a stadium table">Animated stadium trajectories. Numerical status appears below.</canvas><div class="legend"><span class="a">● A — reference</span><span class="b">◆ B — perturbed</span></div><div class="hint">Last 500 collision segments. Dashed line: y = 0.</div></section>
+<section class="panel"><h2>Poincaré section</h2><canvas id="phase" aria-label="Horizontal position versus horizontal velocity at upward crossings of y equals zero">Phase-space points at upward crossings of y = 0.</canvas><p class="hint">x / R horizontally; vₓ / |v| vertically. Only upward crossings (vᵧ &gt; 0), last 4,000 per ball.</p></section></div>
+<div class="stats" id="stats" role="status" aria-live="off"></div>
+<section class="panel"><h2>Try an experiment</h2><p>Start with the circle (a = 0), then compare a = 0.1 or 1 using the same initial conditions. Watch how the trajectories separate and how their section points change. Special periodic trajectories still exist; for example, a horizontal launch through the straight sides.</p>
+<details><summary>Physics, numerical method, and source</summary>
+<p>This is an original browser implementation of the stadium billiard discussed in Nicholas J. Giordano and Hisao Nakanishi, <em>Computational Physics</em>, second edition, §3.7, “The Billiard Problem,” starting on page 82. See the <a href="https://www.physics.purdue.edu/~hisao/book/www/contents.pdf" target="_blank" rel="noopener">authors’ table of contents</a> and <a href="https://www.physics.purdue.edu/~hisao/book/www/samples.html" target="_blank" rel="noopener">stadium sample listing</a>. This is an adaptation, not a transcription of their code or a claim to reproduce one specific numbered exercise.</p>
+<p>Here R = 1, speed = 1, and y₀ = 0. Vertical straight walls are at x = ±R for |y| ≤ a. Semicircles centered at (0, ±a), with radius R, close the top and bottom. Thus a = 0 gives a circle. The particles do not interact; their visible markers represent mathematical point particles.</p>
+<p>Between collisions, r(t + Δt) = r(t) + vΔt. At a wall with outward unit normal n, <code>v′ = v − 2(v · n)n</code>. The program solves ray–line and ray–circle intersections to locate the next collision analytically, then advances both balls to the same physical time. Playback speed changes elapsed simulated time, not collision accuracy. Speed is preserved to floating-point precision.</p>
+<p>The position separation shown below is measured at equal times. It can fluctuate and eventually saturates within the finite table; it is not a fitted Lyapunov exponent. The phase-space section uses upward crossings only, an explicitly chosen convention.</p>
+</details></section>
+</main>
+<script>
+'use strict';
+// Physics is independent of the UI. Lengths are in R; time is in R / speed.
+const EPS = 1e-10;
+function nextHit(p,a) {
+  let best = null;
+  function offer(t,nx,ny,x,y) {
+    if(t > EPS && Number.isFinite(t) && (!best || t < best.t)) best={t,nx,ny,x,y};
+  }
+  // Finite vertical wall segments.
+  if(Math.abs(p.vx)>1e-15) for(const side of [-1,1]) {
+    const t=(side-p.x)/p.vx, y=p.y+p.vy*t;
+    if(Math.abs(y)<=a+1e-12) offer(t,side,0,side,y);
+  }
+  // Keep only the exposed half of each circle. Both roots are considered.
+  for(const side of [-1,1]) {
+    const cy=side*a, dy=p.y-cy, vv=p.vx*p.vx+p.vy*p.vy;
+    const b=p.x*p.vx+dy*p.vy, c=p.x*p.x+dy*dy-1, disc=b*b-vv*c;
+    if(disc < -1e-12) continue;
+    const root=Math.sqrt(Math.max(0,disc));
+    for(const t of [(-b-root)/vv,(-b+root)/vv]) {
+      const x=p.x+p.vx*t, y=p.y+p.vy*t;
+      if(side*(y-cy)>=-1e-12) {
+        const norm=Math.hypot(x,y-cy);
+        offer(t,x/norm,(y-cy)/norm,x/norm,cy+(y-cy)/norm);
+      }
+    }
+  }
+  if(!best) throw new Error('No valid wall intersection; reset the simulation.');
+  return best;
+}
+function makeBall(x,angle,a) {
+  const p={x,y:0,vx:Math.cos(angle),vy:Math.sin(angle),hits:0,trail:[[x,0]],section:[]};
+  p.hit=nextHit(p,a);return p;
+}
+function advance(p,dt,a) {
+  let guard=0;
+  while(dt>1e-13) {
+    if(++guard>10000) throw new Error('Too many near-grazing collisions; choose a different launch.');
+    const collision=p.hit.t<=dt, travel=collision?p.hit.t:dt;
+    const x=p.x+p.vx*travel, y=p.y+p.vy*travel;
+    // Exclude the initial point on y=0 and avoid double-counting endpoints.
+    if(p.y<0 && y>=0 && p.vy>0) {
+      p.section.push([p.x-p.y*p.vx/p.vy,p.vx/Math.hypot(p.vx,p.vy)]);
+      if(p.section.length>4000)p.section.shift();
+    }
+    p.x=x;p.y=y;dt-=travel;
+    if(collision) {
+      p.x=p.hit.x;p.y=p.hit.y;
+      const dot=p.vx*p.hit.nx+p.vy*p.hit.ny;
+      p.vx-=2*dot*p.hit.nx;p.vy-=2*dot*p.hit.ny;p.hits++;
+      p.trail.push([p.x,p.y]);if(p.trail.length>500)p.trail.shift();
+      p.hit=nextHit(p,a);
+    } else p.hit.t-=travel;
+  }
+}
+// UI starts here.
+const $=id=>document.getElementById(id);
+let balls=[],a=0.1,time=0,running=false,last=0;
+function reset() {
+  running=false;$('play').textContent='Start';$('error').textContent='';$('play').disabled=false;$('step').disabled=false;
+  if(!$('x0').checkValidity() || !$('angle').checkValidity() || $('x0').value==='' || $('angle').value==='') {
+    $('play').disabled=true;$('step').disabled=true;$('error').textContent='Enter an initial x between −0.95 and 0.95 and an angle between −360° and 360°.';return false;
+  }
+  a=Number($('shape').value);const x=Number($('x0').value),theta=Number($('angle').value)*Math.PI/180;
+  balls=[makeBall(x,theta,a),makeBall(x+Number($('delta').value),theta,a)];time=0;draw();return true;
+}
+function tick(dt) {try{balls.forEach(p=>advance(p,dt,a));time+=dt;draw();}catch(e){running=false;$('play').textContent='Start';$('error').textContent=e.message;}}
+function setupCanvas(id) {
+  const el=$(id),r=el.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  const w=Math.round(r.width*dpr),h=Math.round(r.height*dpr);
+  if(el.width!==w||el.height!==h){el.width=w;el.height=h;}
+  const c=el.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,r.width,r.height);
+  return {c,w:r.width,h:r.height};
+}
+function draw() {
+  if(!balls.length)return;
+  const colors=['#1264a3','#a74b12'];
+  const {c,w,h}=setupCanvas('table'),s=Math.min((w-48)/2,(h-40)/(2*(a+1)));
+  const X=x=>w/2+s*x,Y=y=>h/2-s*y;
+  c.strokeStyle='#9aaeba';c.setLineDash([4,5]);c.beginPath();c.moveTo(X(-1),Y(0));c.lineTo(X(1),Y(0));c.stroke();c.setLineDash([]);
+  c.strokeStyle='#29495c';c.lineWidth=2;c.beginPath();
+  // Canvas coordinates invert y. Top and bottom arcs connect the straight sides.
+  c.moveTo(X(1),Y(a));c.arc(X(0),Y(a),s,0,Math.PI,true);
+  c.lineTo(X(-1),Y(-a));c.arc(X(0),Y(-a),s,Math.PI,2*Math.PI,true);c.closePath();c.stroke();
+  balls.forEach((p,i)=>{c.strokeStyle=colors[i];c.globalAlpha=.55;c.lineWidth=1;c.setLineDash(i?[5,3]:[]);c.beginPath();p.trail.forEach(([x,y],j)=>j?c.lineTo(X(x),Y(y)):c.moveTo(X(x),Y(y)));c.lineTo(X(p.x),Y(p.y));c.stroke();c.setLineDash([]);c.globalAlpha=1;c.fillStyle=colors[i];c.beginPath();if(!i)c.arc(X(p.x),Y(p.y),5,0,2*Math.PI);else{c.moveTo(X(p.x),Y(p.y)-6);c.lineTo(X(p.x)+6,Y(p.y));c.lineTo(X(p.x),Y(p.y)+6);c.lineTo(X(p.x)-6,Y(p.y));c.closePath();}c.fill();});
+  const q=setupCanvas('phase'),g=q.c,L=44,T=20,W=q.w-64,H=q.h-58;
+  const px=x=>L+(x+1)*W/2,py=v=>T+(1-v)*H/2;
+  g.font='12px system-ui';g.lineWidth=1;
+  for(const v of [-1,-.5,0,.5,1]){g.strokeStyle='#dae3e9';g.beginPath();g.moveTo(px(v),T);g.lineTo(px(v),T+H);g.moveTo(L,py(v));g.lineTo(L+W,py(v));g.stroke();g.fillStyle='#435b6b';g.textAlign='center';g.fillText(v,px(v),T+H+18);g.textAlign='right';g.fillText(v,L-8,py(v)+4);}
+  g.textAlign='center';g.fillText('x / R',L+W/2,q.h-4);g.fillText('vₓ / |v|',L+12,12);
+  balls.forEach((p,i)=>{g.fillStyle=colors[i];g.globalAlpha=.7;p.section.forEach(([x,v])=>{if(i)g.fillRect(px(x)-2,py(v)-2,4,4);else{g.beginPath();g.arc(px(x),py(v),2,0,2*Math.PI);g.fill();}});});
+  const separation=Math.hypot(balls[0].x-balls[1].x,balls[0].y-balls[1].y),error=Math.max(...balls.map(p=>Math.abs(Math.hypot(p.vx,p.vy)-1)));
+  $('stats').textContent=`Time: ${time.toFixed(2)} · Collisions A / B: ${balls[0].hits} / ${balls[1].hits} · Separation / R: ${separation.toExponential(3)} · Speed error: ${error.toExponential(1)}`;
+}
+$('play').onclick=()=>{running=!running;$('play').textContent=running?'Pause':'Start';last=performance.now();};
+$('step').onclick=()=>{running=false;$('play').textContent='Start';tick(1);};$('reset').onclick=reset;
+['shape','x0','angle','delta'].forEach(id=>$(id).addEventListener('change',reset));
+function frame(now){if(running)tick(Math.min((now-last)/1000,.05)*Number($('speed').value));last=now;requestAnimationFrame(frame);}
+new ResizeObserver(draw).observe($('table'));new ResizeObserver(draw).observe($('phase'));
+reset();requestAnimationFrame(frame);
+</script></body></html>
